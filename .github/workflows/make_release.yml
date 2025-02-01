@@ -1,0 +1,33 @@
+name: Release on Merge to Main
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  version: "<major.minor.patch>"  # Update this variable to set the version
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Generate Release Notes
+        id: release_notes
+        run: |
+          echo "## Changes" > release_notes.md
+          git log $(git describe --tags --abbrev=0)..HEAD --oneline >> release_notes.md
+
+      - name: Create GitHub Release
+        uses: actions/create-release@v1
+        with:
+          tag_name: ${{ env.version }}
+          release_name: Release ${{ env.version }}
+          body_path: ./release_notes.md
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

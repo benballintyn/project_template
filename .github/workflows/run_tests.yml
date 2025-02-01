@@ -1,0 +1,124 @@
+name: Run Pytest
+
+on:
+  push:
+    branches:
+      - dev
+  pull_request:
+    branches:
+      - main
+      - dev
+  workflow_dispatch: # Optional: Allows manual triggering from the GitHub UI
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13']
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Fetch the full history to ensure branch checkout works
+      
+      - name: Ensure Correct Branch
+        run: |
+          git fetch origin ${{ github.head_ref }}:${{ github.head_ref }}
+          git checkout ${{ github.head_ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          export PATH="$HOME/.local/bin:$PATH"
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: |
+          poetry install --no-interaction --no-root --with dev
+
+      - name: Run Pytest
+        run: |
+          set -e
+          set -x
+          poetry run pytest --cov=<PACKAGE_NAME> tests/ --cov-report=xml --cov-report=term > coverage.txt
+        env:
+          CI: true
+      
+      - name: Generate Coverage Badge
+        id: generate_badge
+        run: |
+          # Extract only the first line-rate value (usually the total coverage) and sanitize it
+          COVERAGE=$(grep -Po '(?<=line-rate=\")[0-9.]+(?=\")' coverage.xml | head -n 1 | awk '{print int($1 * 100)}')
+          echo "Extracted Coverage: $COVERAGE"
+      
+          # Default badge color
+          COLOR="red"
+          if [ "$COVERAGE" -ge 90 ]; then
+            COLOR="green"
+          elif [ "$COVERAGE" -ge 75 ]; then
+            COLOR="yellow"
+          fi
+      
+          # Generate the SVG badge
+          echo "<svg xmlns='http://www.w3.org/2000/svg' width='120' height='20' role='img' aria-label='coverage: $COVERAGE%'>
+            <title>coverage: $COVERAGE%</title>
+            <rect width='60' height='20' fill='#555'/>
+            <rect x='60' width='60' height='20' fill='$COLOR'/>
+            <text x='30' y='14' fill='#fff' font-family='Verdana, Geneva, DejaVu Sans, sans-serif' font-size='11' text-anchor='middle'>coverage</text>
+            <text x='90' y='14' fill='#fff' font-family='Verdana, Geneva, DejaVu Sans, sans-serif' font-size='11' text-anchor='middle'>$COVERAGE%</text>
+          </svg>" > coverage-badge.svg
+      
+      - name: Commit Coverage Badge
+        if: matrix.python-version == '3.11'
+        run: |
+          git config --local user.name "github-actions"
+          git config --local user.email "actions@github.com"
+          
+          # Stage only the badge file
+          git add coverage-badge.svg || echo "No changes to stage"
+          
+          # Check if there are changes before committing
+          if ! git diff --cached --quiet; then
+            git commit -m "Update coverage badge"
+            git push --set-upstream origin ${{ github.head_ref }}
+          else
+            echo "No changes to commit"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  sync-dev:
+    if: github.ref == 'refs/heads/main'  # Only run if the event is on the main branch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Fetch full history for merging
+
+      - name: Set up Git
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+
+      - name: Sync dev with main
+        run: |
+          # Ensure main is up to date
+          git checkout main
+          git pull origin main
+          
+          # Merge main into dev
+          git checkout dev
+          git merge --ff-only main || echo "No changes to merge"
+          
+          # Push changes back to dev
+          git push origin dev
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
