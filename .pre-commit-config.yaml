@@ -11,7 +11,9 @@ repos:
       - id: trailing-whitespace
       - id: check-shebang-scripts-are-executable
 
-  - repo: https://github.com/koalaman/shellcheck-precommit
-    rev: v0.10.0
+  # shellcheck-py is a pip-packaged shellcheck — no Docker daemon required,
+  # unlike koalaman/shellcheck-precommit.
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
     hooks:
       - id: shellcheck
