@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Local dev launcher for __PACKAGE_NAME__.
+#
+# Currently starts the Next.js dev server. If you add a long-running backend
+# process (API server, scheduler, worker), start it in the background here —
+# see the commented block.
+
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+# --- Optional backend process ---------------------------------------------
+# mkdir -p logs
+# poetry run <your-backend-entrypoint> > logs/backend.log 2>&1 &
+# BACKEND_PID=$!
+# echo "[run.sh] Backend PID: $BACKEND_PID (logs/backend.log)"
+# cleanup() { kill "$BACKEND_PID" 2>/dev/null || true; }
+# trap cleanup EXIT INT TERM
+# --------------------------------------------------------------------------
+
+echo "[run.sh] Starting Next.js dev server on http://localhost:3000"
+cd frontend
+exec npm run dev

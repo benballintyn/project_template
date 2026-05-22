@@ -1,99 +1,207 @@
 #!/usr/bin/env bash
 #
-# Usage: ./init_project.sh <project_name>
+# Scaffold a new Poetry-managed Python project from this template.
 #
-# 1. Create conda environment named <project_name> with Python 3.11.
-# 2. Create new Poetry project <project_name>.
-# 3. Initialize a Git repository.
-# 4. Copy:
-#      - .github/workflows from project_template
-#      - .gitignore from project_template
-#      - .pre-commit-config.yaml from project_template
-# 5. Check if pre-commit is installed; if not, exit with an error. If yes, install the hooks.
+# Usage:
+#   ./new_project.sh <project_name> [--py 3.12] [--desc "..."] [--docker] [--frontend]
 #
-# Prerequisites:
-#   - Conda installed and available on PATH
-#   - Poetry installed
-#   - pre-commit installed
-#   - A sibling directory named 'project_template' containing:
-#       .github/workflows/
-#       .gitignore
-#       .pre-commit-config.yaml
+# Flags:
+#   --py <ver>     Pin the Python interpreter (e.g. 3.12). Default: Poetry's choice.
+#   --desc <text>  One-line project description (used in README/CLAUDE.md).
+#   --docker       Include Dockerfile, .dockerignore, and the build-and-push workflow.
+#   --frontend     Scaffold a Next.js frontend (frontend/) + its CI + scripts/run.sh.
+#
+# What it always does:
+#   1. `poetry new <project_name>` (src layout).
+#   2. Configure Poetry for an in-project .venv.
+#   3. Copy CI (tests + release), pre-commit, .gitignore, README, CLAUDE.md,
+#      and GitHub issue/PR templates.
+#   4. Substitute __PACKAGE_NAME__ / __DESCRIPTION__ tokens.
+#   5. `poetry install`, git init, pre-commit install, initial commit.
+#
+# Prereqs: poetry, pre-commit, git (+ node/npm when --frontend is used).
 
-set -e  # Exit immediately if any command fails
+set -euo pipefail
 
-# Check usage
-if [ -z "$1" ]; then
-  echo "Error: No project name provided."
-  echo "Usage: $0 <project_name>"
+# ─── arg parsing ──────────────────────────────────────────────────────────────
+PROJECT_NAME=""
+PY_VERSION=""
+DESCRIPTION=""
+WITH_DOCKER=false
+WITH_FRONTEND=false
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --py)       PY_VERSION="$2"; shift 2 ;;
+    --desc)     DESCRIPTION="$2"; shift 2 ;;
+    --docker)   WITH_DOCKER=true; shift ;;
+    --frontend) WITH_FRONTEND=true; shift ;;
+    -h|--help)  sed -n '3,21p' "$0"; exit 0 ;;
+    *)
+      if [[ -z "$PROJECT_NAME" ]]; then PROJECT_NAME="$1"; shift
+      else echo "Error: unexpected arg '$1'"; exit 1; fi ;;
+  esac
+done
+
+if [[ -z "$PROJECT_NAME" ]]; then
+  echo "Error: project name required."
+  echo "Usage: $0 <project_name> [--py 3.12] [--desc \"...\"] [--docker] [--frontend]"
+  exit 1
+fi
+[[ -z "$DESCRIPTION" ]] && DESCRIPTION="A ${PROJECT_NAME} project."
+
+# ─── prereq checks ────────────────────────────────────────────────────────────
+REQUIRED=(poetry pre-commit git)
+$WITH_FRONTEND && REQUIRED+=(node npm)
+for cmd in "${REQUIRED[@]}"; do
+  if ! command -v "$cmd" &>/dev/null; then
+    echo "Error: '$cmd' not found on PATH. Install it and re-run."
+    exit 1
+  fi
+done
+
+TEMPLATE_DIR="$(cd "$(dirname "$0")" && pwd)"
+TARGET_DIR="$(pwd)/${PROJECT_NAME}"
+if [[ -e "$TARGET_DIR" ]]; then
+  echo "Error: '$TARGET_DIR' already exists. Pick a different name or remove it."
   exit 1
 fi
 
-PROJECT_NAME="$1"
+# ─── scaffold ─────────────────────────────────────────────────────────────────
+echo "[1/7] Creating Poetry project '${PROJECT_NAME}'..."
+poetry new "${PROJECT_NAME}"
+cd "${PROJECT_NAME}"
 
-# Check for conda
-if ! command -v conda &> /dev/null; then
-  echo "Error: conda not found. Please install it or ensure it's on your PATH."
-  exit 1
+echo "[2/7] Configuring Poetry to use an in-project .venv..."
+poetry config virtualenvs.create true --local
+poetry config virtualenvs.in-project true --local
+
+if [[ -n "$PY_VERSION" ]]; then
+  echo "[3/7] Selecting Python ${PY_VERSION}..."
+  poetry env use "python${PY_VERSION}"
+else
+  echo "[3/7] Using default Python (skip with --py to pin a version)."
 fi
 
-echo "Creating conda environment '$PROJECT_NAME' with Python 3.11..."
-conda create -y -n "$PROJECT_NAME" python=3.11
+echo "[4/7] Copying template files..."
+rm -f .gitignore README.md
+mkdir -p .github/workflows .github/ISSUE_TEMPLATE
 
-echo "Activating conda environment '$PROJECT_NAME'..."
-# Adjust this path if your conda installation is elsewhere
-source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate "$PROJECT_NAME"
+# Always: CI, release automation, config, docs, GitHub templates.
+cp "${TEMPLATE_DIR}/.github/workflows/run_tests.yml"      .github/workflows/
+cp "${TEMPLATE_DIR}/.github/workflows/release_please.yml" .github/workflows/
+cp "${TEMPLATE_DIR}/.github/workflows/pr_title.yml"       .github/workflows/
+cp "${TEMPLATE_DIR}/.github/ISSUE_TEMPLATE/"*.md          .github/ISSUE_TEMPLATE/
+cp "${TEMPLATE_DIR}/.github/pull_request_template.md"     .github/
+cp "${TEMPLATE_DIR}/.gitignore"                           .gitignore
+cp "${TEMPLATE_DIR}/.pre-commit-config.yaml"              .pre-commit-config.yaml
+cp "${TEMPLATE_DIR}/release-please-config.json"           release-please-config.json
+cp "${TEMPLATE_DIR}/.release-please-manifest.json"        .release-please-manifest.json
+cp "${TEMPLATE_DIR}/README.md.template"                   README.md
+cp "${TEMPLATE_DIR}/CLAUDE.md.template"                   CLAUDE.md
 
-echo "Creating a new Poetry project: $PROJECT_NAME"
-poetry new "$PROJECT_NAME"
+# CHANGELOG.md is owned by release-please; ship a minimal stub for it to grow.
+printf '# Changelog\n\nAll notable changes are recorded here automatically by release-please.\n' \
+  > CHANGELOG.md
 
-cd "$PROJECT_NAME"
+# Token-substitution targets, extended as optional pieces are added.
+TARGETS=(
+  "README.md"
+  "CLAUDE.md"
+)
 
-# Remove the default .gitignore created by Poetry (if you want to replace it fully)
-if [ -f ".gitignore" ]; then
-  rm .gitignore
+if $WITH_DOCKER; then
+  echo "      + Docker (Dockerfile, .dockerignore, build_and_push.yml)"
+  cp "${TEMPLATE_DIR}/Dockerfile"     Dockerfile
+  cp "${TEMPLATE_DIR}/.dockerignore"  .dockerignore
+  cp "${TEMPLATE_DIR}/.github/workflows/build_and_push.yml" .github/workflows/
+  TARGETS+=("Dockerfile" ".github/workflows/build_and_push.yml")
 fi
 
-echo "Initializing a Git repository..."
-git init
+if $WITH_FRONTEND; then
+  echo "      + Next.js frontend (this runs create-next-app, may take a minute)"
+  npx --yes create-next-app@latest frontend \
+    --typescript --tailwind --eslint --app --no-src-dir \
+    --import-alias "@/*" --use-npm --turbopack
+  # create-next-app initializes its own git repo; drop it so the parent repo
+  # tracks frontend/ as plain files instead of an embedded gitlink.
+  rm -rf frontend/.git
+  cp "${TEMPLATE_DIR}/.github/workflows/frontend_ci.yml" .github/workflows/
+  mkdir -p scripts
+  cp "${TEMPLATE_DIR}/scripts/run.sh.template" scripts/run.sh
+  chmod +x scripts/run.sh
+  TARGETS+=("scripts/run.sh")
+  cat >> .gitignore <<'EOF'
 
-echo "Adding project files to Git..."
-git add .
-
-echo "Committing the initial Poetry scaffold..."
-git commit -m "Initial commit (Poetry scaffold)"
-
-echo "Copying GitHub Actions workflows from project_template..."
-mkdir -p .github/workflows
-cp ../project_template/.github/workflows/* .github/workflows/
-
-echo "Copying .gitignore from project_template..."
-cp ../project_template/.gitignore .gitignore
-
-echo "Copying .pre-commit-config.yaml from project_template..."
-cp ../project_template/.pre-commit-config.yaml .pre-commit-config.yaml
-
-echo "Adding new project files to Git..."
-git add .github/workflows .gitignore .pre-commit-config.yaml
-git commit -m "Add GitHub Actions workflows, .gitignore, and pre-commit config"
-
-# Check if pre-commit is installed
-if ! command -v pre-commit &> /dev/null; then
-  echo "Error: pre-commit not found. Please install it and run this script again."
-  echo "Exiting..."
-  exit 1
+# Node / Next.js (frontend/)
+node_modules/
+.next/
+.turbo/
+next-env.d.ts
+*.tsbuildinfo
+EOF
 fi
 
-echo "Setting up pre-commit..."
-pre-commit install
+echo "[5/7] Substituting __PACKAGE_NAME__ / __DESCRIPTION__ tokens..."
+PKG_IMPORT="${PROJECT_NAME//-/_}"
+for f in "${TARGETS[@]}"; do
+  [[ -f "$f" ]] || continue
+  sed "s|__PACKAGE_NAME__|${PKG_IMPORT}|g; s|__DESCRIPTION__|${DESCRIPTION}|g" \
+      "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+done
 
-echo
-echo "=================================================="
-echo "Project '$PROJECT_NAME' setup complete!"
-echo "Conda environment '$PROJECT_NAME' is active."
-echo "Next steps:"
-echo "1. Review .gitignore and .pre-commit-config.yaml as needed."
-echo "2. Start developing in the $PROJECT_NAME folder."
-echo "3. If you installed pre-commit just now, it is set up and ready to run."
-echo "=================================================="
+# Starter pyproject.toml config block for ruff/mypy/pytest.
+cat >> pyproject.toml <<EOF
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3"
+pytest-cov = "^5.0"
+pytest-mock = "^3.14"
+ruff = "^0.8"
+mypy = "^1.13"
+pre-commit = "^4.0"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B", "SIM", "RUF"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers --cov=${PKG_IMPORT} --cov-report=term-missing"
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.11"
+EOF
+
+echo "[6/7] Running 'poetry install'..."
+poetry install --no-interaction
+
+echo "[7/7] Initializing git, installing pre-commit hooks, first commit..."
+git init -q -b main
+git add -A
+git commit -q -m "Initial scaffold from project_template" || true
+pre-commit install >/dev/null
+if ! git diff --cached --quiet || ! git diff --quiet; then
+  git add -A
+  git commit -q -m "Apply pre-commit auto-fixes" || true
+fi
+
+cat <<EOF
+
+================================================================================
+✓ '${PROJECT_NAME}' scaffolded at ${TARGET_DIR}
+   docker:   $($WITH_DOCKER && echo yes || echo no)
+   frontend: $($WITH_FRONTEND && echo yes || echo no)
+
+Next steps:
+  cd ${PROJECT_NAME}
+  poetry run pytest
+EOF
+$WITH_FRONTEND && echo "  ./scripts/run.sh                              # frontend dev server"
+cat <<EOF
+  gh repo create ${PROJECT_NAME} --private --source=. --remote=origin --push
+================================================================================
+EOF

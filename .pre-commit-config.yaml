@@ -1,25 +1,23 @@
 repos:
-  - repo: https://github.com/psf/black
-    rev: 23.9.1  # Use the latest stable version
-    hooks:
-      - id: black
-
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.8.0  # Use the latest stable version
+    rev: v0.8.6
     hooks:
       - id: ruff
-        types_or: [ python, pyi ]
+        args: [--fix]
+      - id: ruff-format
 
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.5.1  # Use the latest stable version
+    rev: v1.13.0
     hooks:
       - id: mypy
+        # Add project-specific stub packages here, e.g. types-requests
+        additional_dependencies: []
 
   - repo: https://github.com/Yelp/detect-secrets
-    rev: v1.3.0  # Use the latest stable version
+    rev: v1.5.0
     hooks:
       - id: detect-secrets
-  
+
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
@@ -28,10 +26,7 @@ repos:
       - id: check-json
       - id: check-toml
       - id: check-yaml
+      - id: check-merge-conflict
       - id: check-shebang-scripts-are-executable
-
-  - repo: https://github.com/pycqa/isort
-    rev: 5.13.2
-    hooks:
-      - id: isort
-        args: [ "--profile", "black" ]
+      - id: end-of-file-fixer
+      - id: trailing-whitespace

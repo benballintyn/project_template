@@ -1,33 +1,70 @@
 name: Build and Push Docker Image
 
+# Pushes to Docker Hub on every commit to main, plus on version tags.
+# For GCP Artifact Registry instead, see the commented block at the bottom.
 on:
   push:
-    branches:
-      - main  # Trigger on pushes to the main branch
+    branches: [main]
+    tags: ["v*.*.*"]
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
+
+      - name: Docker metadata (tags + labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKER_USERNAME }}/__PACKAGE_NAME__
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Build and Push Docker Image
-        uses: docker/build-push-action@v4
+      - name: Build and push
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          tags: ${{ secrets.DOCKER_USERNAME }}/<PACKAGE_NAME>:latest
-          labels: |
-            org.opencontainers.image.source=<REPOSITORY_URL>
-          outputs: type=docker
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+# --- GCP Artifact Registry variant (uncomment + delete the Docker Hub steps above) ---
+# Prereqs (one-time, per repo):
+#   1. In GCP: create an Artifact Registry repo (e.g. us-docker.pkg.dev/PROJECT/REPO)
+#   2. Set up Workload Identity Federation, store the WIF provider + service account
+#      as repo secrets (GCP_WIF_PROVIDER, GCP_SA_EMAIL)
+#
+# - name: Authenticate to GCP
+#   uses: google-github-actions/auth@v2
+#   with:
+#     workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+#     service_account: ${{ secrets.GCP_SA_EMAIL }}
+#
+# - name: Configure docker for GAR
+#   run: gcloud auth configure-docker us-docker.pkg.dev --quiet
+#
+# - name: Build and push to GAR
+#   uses: docker/build-push-action@v6
+#   with:
+#     context: .
+#     push: true
+#     tags: us-docker.pkg.dev/PROJECT/REPO/__PACKAGE_NAME__:${{ github.sha }}

@@ -1,0 +1,26 @@
+# __PACKAGE_NAME__
+
+Project-specific guidance for Claude Code. The global preferences in
+`~/.claude/CLAUDE.md` (Python/Poetry conventions, testing standards, etc.)
+still apply — this file is only for what's specific to this repo.
+
+## Overview
+
+__DESCRIPTION__
+
+## Architecture
+
+<!-- Key modules, data flow, entry points. Fill in as the project takes shape. -->
+
+## Conventions
+
+- **PRs are squash-merged.** The PR title becomes the sole commit on `main`,
+  so the **PR title must follow Conventional Commits** (`feat:` / `fix:` /
+  `feat!:` / `BREAKING CHANGE:` etc.). Branch commits are exempt — clear
+  messages are enough. release-please reads merged PR titles for versioning.
+
+<!-- Add anything else that overrides or extends the global preferences. -->
+
+## Gotchas
+
+<!-- Non-obvious constraints, footguns, external dependencies. -->

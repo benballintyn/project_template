@@ -1,0 +1,32 @@
+# __PACKAGE_NAME__
+
+__DESCRIPTION__
+
+## Setup
+
+```bash
+poetry install
+```
+
+## Development
+
+```bash
+poetry run pytest                # tests
+poetry run ruff check .          # lint
+poetry run ruff format .         # format
+poetry run mypy src tests        # type-check
+poetry run pre-commit run --all-files
+```
+
+## Releases
+
+Releases are automated by [release-please](https://github.com/googleapis/release-please).
+PRs are squash-merged, and the **PR title must follow
+[Conventional Commits](https://www.conventionalcommits.org/)** (`feat:`, `fix:`,
+`feat!:` / `BREAKING CHANGE:` for a major bump). release-please reads merged PRs
+and maintains a standing "release PR" that bumps the version and updates
+`CHANGELOG.md`; merging that PR tags `vX.Y.Z` and publishes a GitHub Release.
+
+## License
+
+See [LICENSE](LICENSE).
