@@ -11,17 +11,16 @@
 #   --docker       Include Dockerfile, .dockerignore, and the build-and-push workflow.
 #   --frontend     Scaffold a Next.js frontend (frontend/) + its CI + scripts/run.sh.
 #
-# What it always does:
-#   1. `poetry new <project_name>` (src layout).
-#   2. Configure Poetry for an in-project .venv.
-#   3. Copy CI (tests + release), pre-commit, .gitignore, README, CLAUDE.md,
-#      and GitHub issue/PR templates.
-#   4. Substitute __PACKAGE_NAME__ / __DESCRIPTION__ tokens.
-#   5. `poetry install`, git init, pre-commit install, initial commit.
+# Copyable assets live under template/ (inert here so they don't run on the
+# template repo itself). This script copies them into the new project.
 #
 # Prereqs: poetry, pre-commit, git (+ node/npm when --frontend is used).
 
 set -euo pipefail
+
+usage() {
+  sed -n '4,13p' "$0" | sed 's/^# \{0,1\}//'
+}
 
 # ─── arg parsing ──────────────────────────────────────────────────────────────
 PROJECT_NAME=""
@@ -36,7 +35,7 @@ while [[ $# -gt 0 ]]; do
     --desc)     DESCRIPTION="$2"; shift 2 ;;
     --docker)   WITH_DOCKER=true; shift ;;
     --frontend) WITH_FRONTEND=true; shift ;;
-    -h|--help)  sed -n '3,21p' "$0"; exit 0 ;;
+    -h|--help)  usage; exit 0 ;;
     *)
       if [[ -z "$PROJECT_NAME" ]]; then PROJECT_NAME="$1"; shift
       else echo "Error: unexpected arg '$1'"; exit 1; fi ;;
@@ -45,14 +44,16 @@ done
 
 if [[ -z "$PROJECT_NAME" ]]; then
   echo "Error: project name required."
-  echo "Usage: $0 <project_name> [--py 3.12] [--desc \"...\"] [--docker] [--frontend]"
+  usage
   exit 1
 fi
 [[ -z "$DESCRIPTION" ]] && DESCRIPTION="A ${PROJECT_NAME} project."
 
 # ─── prereq checks ────────────────────────────────────────────────────────────
 REQUIRED=(poetry pre-commit git)
-$WITH_FRONTEND && REQUIRED+=(node npm)
+if $WITH_FRONTEND; then
+  REQUIRED+=(node npm)
+fi
 for cmd in "${REQUIRED[@]}"; do
   if ! command -v "$cmd" &>/dev/null; then
     echo "Error: '$cmd' not found on PATH. Install it and re-run."
@@ -60,19 +61,19 @@ for cmd in "${REQUIRED[@]}"; do
   fi
 done
 
-# Locate the template directory. The script's own dir is the default, but a
+# Locate the template/ directory. The script's own dir is the default, but a
 # copy may live elsewhere (e.g. mirrored to a repos root for convenience), so
-# fall back to a project_template/ subdirectory if the marker file is missing.
-TEMPLATE_DIR="$(cd "$(dirname "$0")" && pwd)"
-if [[ ! -f "${TEMPLATE_DIR}/.pre-commit-config.yaml" ]]; then
-  if [[ -f "${TEMPLATE_DIR}/project_template/.pre-commit-config.yaml" ]]; then
-    TEMPLATE_DIR="${TEMPLATE_DIR}/project_template"
-  else
-    echo "Error: cannot locate the template files (looked in ${TEMPLATE_DIR}"
-    echo "       and ${TEMPLATE_DIR}/project_template). Run this script from"
-    echo "       inside project_template/, or beside the project_template/ dir."
-    exit 1
-  fi
+# fall back to a project_template/ subdirectory.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [[ -d "${SCRIPT_DIR}/template" ]]; then
+  TEMPLATE_DIR="${SCRIPT_DIR}/template"
+elif [[ -d "${SCRIPT_DIR}/project_template/template" ]]; then
+  TEMPLATE_DIR="${SCRIPT_DIR}/project_template/template"
+else
+  echo "Error: cannot locate the template/ directory (looked in ${SCRIPT_DIR}"
+  echo "       and ${SCRIPT_DIR}/project_template). Run this script from inside"
+  echo "       project_template/, or beside the project_template/ directory."
+  exit 1
 fi
 
 TARGET_DIR="$(pwd)/${PROJECT_NAME}"
@@ -107,20 +108,23 @@ fi
 
 echo "[4/7] Copying template files..."
 rm -f .gitignore README.md
-mkdir -p .github/workflows .github/ISSUE_TEMPLATE
+mkdir -p .github/workflows .github/ISSUE_TEMPLATE tests
 
-# Always: CI, release automation, config, docs, GitHub templates.
-cp "${TEMPLATE_DIR}/.github/workflows/run_tests.yml"      .github/workflows/
-cp "${TEMPLATE_DIR}/.github/workflows/release_please.yml" .github/workflows/
-cp "${TEMPLATE_DIR}/.github/workflows/pr_title.yml"       .github/workflows/
-cp "${TEMPLATE_DIR}/.github/ISSUE_TEMPLATE/"*.md          .github/ISSUE_TEMPLATE/
-cp "${TEMPLATE_DIR}/.github/pull_request_template.md"     .github/
-cp "${TEMPLATE_DIR}/.gitignore"                           .gitignore
-cp "${TEMPLATE_DIR}/.pre-commit-config.yaml"              .pre-commit-config.yaml
-cp "${TEMPLATE_DIR}/release-please-config.json"           release-please-config.json
-cp "${TEMPLATE_DIR}/.release-please-manifest.json"        .release-please-manifest.json
-cp "${TEMPLATE_DIR}/README.md.template"                   README.md
-cp "${TEMPLATE_DIR}/CLAUDE.md.template"                   CLAUDE.md
+GH="${TEMPLATE_DIR}/github"
+
+# Always: CI, release automation, config, docs, GitHub templates, smoke test.
+cp "${GH}/workflows/run_tests.yml"          .github/workflows/
+cp "${GH}/workflows/release_please.yml"     .github/workflows/
+cp "${GH}/workflows/pr_title.yml"           .github/workflows/
+cp "${GH}/ISSUE_TEMPLATE/"*.md              .github/ISSUE_TEMPLATE/
+cp "${GH}/pull_request_template.md"         .github/
+cp "${TEMPLATE_DIR}/gitignore"              .gitignore
+cp "${TEMPLATE_DIR}/pre-commit-config.yaml" .pre-commit-config.yaml
+cp "${TEMPLATE_DIR}/release-please-config.json"   release-please-config.json
+cp "${TEMPLATE_DIR}/release-please-manifest.json" .release-please-manifest.json
+cp "${TEMPLATE_DIR}/README.md.template"     README.md
+cp "${TEMPLATE_DIR}/CLAUDE.md.template"     CLAUDE.md
+cp "${TEMPLATE_DIR}/tests/test_smoke.py"    tests/test_smoke.py
 
 # CHANGELOG.md is owned by release-please; ship a minimal stub for it to grow.
 printf '# Changelog\n\nAll notable changes are recorded here automatically by release-please.\n' \
@@ -130,13 +134,14 @@ printf '# Changelog\n\nAll notable changes are recorded here automatically by re
 TARGETS=(
   "README.md"
   "CLAUDE.md"
+  "tests/test_smoke.py"
 )
 
 if $WITH_DOCKER; then
   echo "      + Docker (Dockerfile, .dockerignore, build_and_push.yml)"
-  cp "${TEMPLATE_DIR}/Dockerfile"     Dockerfile
-  cp "${TEMPLATE_DIR}/.dockerignore"  .dockerignore
-  cp "${TEMPLATE_DIR}/.github/workflows/build_and_push.yml" .github/workflows/
+  cp "${TEMPLATE_DIR}/Dockerfile"             Dockerfile
+  cp "${TEMPLATE_DIR}/dockerignore"           .dockerignore
+  cp "${GH}/workflows/build_and_push.yml"     .github/workflows/
   TARGETS+=("Dockerfile" ".github/workflows/build_and_push.yml")
 fi
 
@@ -148,7 +153,7 @@ if $WITH_FRONTEND; then
   # create-next-app initializes its own git repo; drop it so the parent repo
   # tracks frontend/ as plain files instead of an embedded gitlink.
   rm -rf frontend/.git
-  cp "${TEMPLATE_DIR}/.github/workflows/frontend_ci.yml" .github/workflows/
+  cp "${GH}/workflows/frontend_ci.yml"        .github/workflows/
   mkdir -p scripts
   cp "${TEMPLATE_DIR}/scripts/run.sh.template" scripts/run.sh
   chmod +x scripts/run.sh
@@ -211,18 +216,25 @@ if ! git diff --cached --quiet || ! git diff --quiet; then
   git commit -q -m "Apply pre-commit auto-fixes" || true
 fi
 
+DOCKER_LABEL=no
+$WITH_DOCKER && DOCKER_LABEL=yes
+FRONTEND_LABEL=no
+$WITH_FRONTEND && FRONTEND_LABEL=yes
+
 cat <<EOF
 
 ================================================================================
 ✓ '${PROJECT_NAME}' scaffolded at ${TARGET_DIR}
-   docker:   $($WITH_DOCKER && echo yes || echo no)
-   frontend: $($WITH_FRONTEND && echo yes || echo no)
+   docker:   ${DOCKER_LABEL}
+   frontend: ${FRONTEND_LABEL}
 
 Next steps:
   cd ${PROJECT_NAME}
   poetry run pytest
 EOF
-$WITH_FRONTEND && echo "  ./scripts/run.sh                              # frontend dev server"
+if $WITH_FRONTEND; then
+  echo "  ./scripts/run.sh                              # frontend dev server"
+fi
 cat <<EOF
   gh repo create ${PROJECT_NAME} --private --source=. --remote=origin --push
 ================================================================================
