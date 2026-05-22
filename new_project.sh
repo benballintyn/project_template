@@ -60,7 +60,21 @@ for cmd in "${REQUIRED[@]}"; do
   fi
 done
 
+# Locate the template directory. The script's own dir is the default, but a
+# copy may live elsewhere (e.g. mirrored to a repos root for convenience), so
+# fall back to a project_template/ subdirectory if the marker file is missing.
 TEMPLATE_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [[ ! -f "${TEMPLATE_DIR}/.pre-commit-config.yaml" ]]; then
+  if [[ -f "${TEMPLATE_DIR}/project_template/.pre-commit-config.yaml" ]]; then
+    TEMPLATE_DIR="${TEMPLATE_DIR}/project_template"
+  else
+    echo "Error: cannot locate the template files (looked in ${TEMPLATE_DIR}"
+    echo "       and ${TEMPLATE_DIR}/project_template). Run this script from"
+    echo "       inside project_template/, or beside the project_template/ dir."
+    exit 1
+  fi
+fi
+
 TARGET_DIR="$(pwd)/${PROJECT_NAME}"
 if [[ -e "$TARGET_DIR" ]]; then
   echo "Error: '$TARGET_DIR' already exists. Pick a different name or remove it."
@@ -71,6 +85,14 @@ fi
 echo "[1/7] Creating Poetry project '${PROJECT_NAME}'..."
 poetry new "${PROJECT_NAME}"
 cd "${PROJECT_NAME}"
+
+# `poetry new` writes `requires-python` from whatever interpreter Poetry runs
+# under — which may be newer than what you want, and would then *block*
+# `poetry env use` from selecting an older interpreter. Pin a stable range up
+# front so the template's intent wins, not the ambient Python.
+echo "      Pinning requires-python to >=3.11,<3.14..."
+sed 's/^requires-python = .*/requires-python = ">=3.11,<3.14"/' pyproject.toml \
+  > pyproject.toml.tmp && mv pyproject.toml.tmp pyproject.toml
 
 echo "[2/7] Configuring Poetry to use an in-project .venv..."
 poetry config virtualenvs.create true --local
